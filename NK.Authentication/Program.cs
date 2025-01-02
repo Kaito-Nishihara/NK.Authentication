@@ -1,8 +1,14 @@
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using NK.Authentication.Data;
 
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Services.AddDbContext<AppDbContext>(options =>
+{
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+});
 // IdentityServerの設定
 builder.Services.AddIdentityServer()
     .AddDeveloperSigningCredential() // 開発用の署名キーを生成
@@ -10,7 +16,7 @@ builder.Services.AddIdentityServer()
     {
         new Client
         {
-            ClientId = "aeon_app",
+            ClientId = "nk_app",
             AllowedGrantTypes = GrantTypes.ResourceOwnerPassword,
             ClientSecrets = { new Secret("secret".Sha256()) },
             AllowedScopes = { "openid", "profile", "api" }
@@ -18,7 +24,7 @@ builder.Services.AddIdentityServer()
     })
     .AddInMemoryApiScopes(new List<ApiScope>
     {
-        new ApiScope("api", "AEON API")
+        new ApiScope("api", "NK API")
     })
     .AddInMemoryIdentityResources(new List<IdentityResource>
     {
@@ -40,13 +46,25 @@ builder.Services.AddIdentityServer()
         }
     });
 
-builder.Services.AddAuthentication("Bearer")
-    .AddJwtBearer("Bearer", options =>
-    {
-        options.Authority = "https://localhost:7088"; // IdentityServer の URL
-        options.Audience = "api"; // スコープ名
-        options.RequireHttpsMetadata = true; // HTTPSを必須化
-    });
+builder.Services.AddAuthentication(options =>
+{
+    // デフォルトの認証スキームを "Bearer"（JWT）に設定
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer("Bearer", options =>
+{
+    options.Authority = "https://localhost:7088"; // IdentityServer の URL
+    options.Audience = "api"; // スコープ名
+    options.RequireHttpsMetadata = true; // HTTPSを必須化
+})
+.AddGoogle("Google", options =>
+{
+    options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
+    options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
+    options.CallbackPath = "/signin-google"; // Google認証後のリダイレクト先
+});
+
 
 builder.Services.AddControllers();
 

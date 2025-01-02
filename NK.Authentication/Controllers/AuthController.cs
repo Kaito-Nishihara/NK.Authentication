@@ -1,11 +1,12 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using NK.Authentication.Data;
 using NK.Authentication.Models;
-using Org.BouncyCastle.Crypto.Generators;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Mail;
 using System.Security.Claims;
@@ -19,6 +20,11 @@ namespace NK.Authentication.Controllers
     public class AuthController(AppDbContext context, IConfiguration configuration) : ControllerBase
     {       
 
+        /// <summary>
+        /// ログイン
+        /// </summary>
+        /// <param name="request"></param>
+        /// <returns></returns>
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
@@ -32,6 +38,11 @@ namespace NK.Authentication.Controllers
             return Unauthorized("Invalid credentials");
         }
 
+        /// <summary>
+        /// 登録
+        /// </summary>
+        /// <param name="request"></param>
+        /// <returns></returns>
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
@@ -107,6 +118,52 @@ namespace NK.Authentication.Controllers
 
             return Ok(user);
         }
+
+        [HttpGet("google-login")]
+        public IActionResult GoogleLogin()
+        {
+            var redirectUrl = Url.Action("GoogleCallback", "Auth");
+            var properties = new AuthenticationProperties { RedirectUri = redirectUrl };
+            return Challenge(properties, GoogleDefaults.AuthenticationScheme);
+        }
+
+        [HttpGet("google-callback")]
+        public async Task<IActionResult> GoogleCallback()
+        {
+            var authenticateResult = await HttpContext.AuthenticateAsync(GoogleDefaults.AuthenticationScheme);
+
+            if (!authenticateResult.Succeeded)
+            {
+                return Unauthorized("Google authentication failed.");
+            }
+
+            var email = authenticateResult.Principal.FindFirst(ClaimTypes.Email)?.Value;
+
+            if (string.IsNullOrEmpty(email))
+            {
+                return BadRequest("Failed to retrieve email from Google.");
+            }
+
+            // ユーザーをデータベースに保存する処理を追加
+            var user = await context.Users.FirstOrDefaultAsync(u => u.Email == email);
+            if (user == null)
+            {
+                user = new User
+                {
+                    Email = email,
+                    Role = "User",
+                    PasswordHash = null // Googleログインではパスワードは不要
+                };
+
+                context.Users.Add(user);
+                await context.SaveChangesAsync();
+            }
+
+            // JWTトークンを生成して返す
+            var token = GenerateJwtToken(user.Email);
+            return Ok(new { Token = token, User = user });
+        }
+
 
         private bool VerifyPassword(string password, string passwordHash)
         {
